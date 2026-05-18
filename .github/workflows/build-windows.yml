@@ -12,9 +12,15 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # 1. Checkout your source code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 2. Setup MSBuild.exe (the tool that compiles Visual Studio projects)
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # 3. Setup Npcap SDK (required dependency)
       - name: Setup Npcap SDK
         shell: pwsh
         run: |
@@ -22,32 +28,28 @@ jobs:
           tar -xf npcap-sdk.zip
           echo "PCAP_DIR=$env:GITHUB_WORKSPACE\npcap-sdk" >> $env:GITHUB_ENV
 
-      - name: Verify Npcap SDK layout
-        shell: pwsh
-        run: |
-          Get-ChildItem -Recurse $env:PCAP_DIR | Select-Object FullName
+      # 4. Restore NuGet packages (if any, good practice for VS projects)
+      - name: Restore NuGet packages
+        run: nuget restore vs10\masscan.sln
 
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+      # 5. Build the solution (Release, x64 configuration)
+      - name: Build masscan with MSBuild
+        run: msbuild vs10\masscan.sln /p:Configuration=Release /p:Platform=x64
 
-      - name: Build masscan
-        shell: cmd
-        run: |
-          nmake -f Makefile.msvc
-
+      # 6. Verify the .exe was created
       - name: Check binary
         shell: cmd
         run: |
           if not exist "bin\masscan.exe" exit /b 1
 
+      # 7. Upload the .exe as an artifact (available on every run)
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: masscan-win64
           path: bin\masscan.exe
 
+      # 8. Create a GitHub Release and attach the .exe (only on tags)
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
