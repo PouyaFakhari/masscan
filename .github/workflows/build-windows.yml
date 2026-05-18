@@ -12,44 +12,50 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1. Checkout your source code
       - name: Checkout code
         uses: actions/checkout@v4
+        # Repository is at D:\a\masscan\masscan (runner workspace)
 
-      # 2. Setup MSBuild.exe (the tool that compiles Visual Studio projects)
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # 3. Setup Npcap SDK (required dependency)
-      - name: Setup Npcap SDK
+      - name: Download Npcap SDK
         shell: pwsh
         run: |
-          curl -L -o npcap-sdk.zip https://npcap.com/dist/npcap-sdk-1.13.zip
-          tar -xf npcap-sdk.zip
-          echo "PCAP_DIR=$env:GITHUB_WORKSPACE\npcap-sdk" >> $env:GITHUB_ENV
+          # Download SDK to a temp location
+          curl -L -o $env:RUNNER_TEMP\npcap-sdk.zip https://npcap.com/dist/npcap-sdk-1.13.zip
+          tar -xf $env:RUNNER_TEMP\npcap-sdk.zip -C $env:RUNNER_TEMP
 
-      # 4. Restore NuGet packages (if any, good practice for VS projects)
-      - name: Restore NuGet packages
-        run: nuget restore vs10\masscan.sln
+      - name: Place Npcap SDK where the project expects it
+        shell: pwsh
+        run: |
+          # The .vcxproj looks for ..\..\npcap-sdk (two levels up from vs10)
+          # So we place it in the PARENT of the workspace, i.e., alongside the masscan repo folder
+          $targetPath = "$env:GITHUB_WORKSPACE\..\npcap-sdk"
+          Copy-Item -Path "$env:RUNNER_TEMP\npcap-sdk" -Destination $targetPath -Recurse -Force
+          Write-Host "SDK placed at: $targetPath"
 
-      # 5. Build the solution (Release, x64 configuration)
-      - name: Build masscan with MSBuild
-        run: msbuild vs10\masscan.sln /p:Configuration=Release /p:Platform=x64
+      - name: Build masscan (Release x64)
+        run: |
+          msbuild vs10\masscan.sln `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0 `
+            /m
+        shell: pwsh
 
-      # 6. Verify the .exe was created
-      - name: Check binary
+      - name: Verify build output
         shell: cmd
         run: |
           if not exist "bin\masscan.exe" exit /b 1
 
-      # 7. Upload the .exe as an artifact (available on every run)
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: masscan-win64
           path: bin\masscan.exe
 
-      # 8. Create a GitHub Release and attach the .exe (only on tags)
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
